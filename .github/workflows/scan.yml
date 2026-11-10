@@ -2,9 +2,10 @@ name: scan-divergence
 
 on:
   schedule:
-    # Daily candles close 00:00 UTC, weekly candles close Monday 00:00 UTC. Run 10 min later (and again at 12:10 as a retry).
+    # 22:00 UTC = 05:00 WIB (requested morning run; scans the candles that already closed).
+    # 00:10 UTC = 07:10 WIB: daily candles close 00:00 UTC (weekly: Monday 00:00 UTC), so this run catches the newest candle.
+    - cron: "0 22 * * *"
     - cron: "10 0 * * *"
-    - cron: "10 12 * * *"
   workflow_dispatch: {}
 
 permissions:
