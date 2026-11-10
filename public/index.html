@@ -18,6 +18,8 @@ th{position:sticky;top:0;background:var(--panel);cursor:pointer;user-select:none
 tr.row{cursor:pointer}tr.row:hover,tr.row.on{background:var(--hl)}tr.inv{opacity:.5}
 .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;color:#0e1116}
 .up{color:var(--g)}.dn{color:var(--r)}
+.conf{background:#f5c518;color:#1a1400;margin-left:4px}
+#cwarn{display:none;padding:6px 12px;background:#3a2f00;color:#f5c518;border-bottom:1px solid var(--line);font-size:12px}
 .btn{padding:2px 7px;font-size:11px}.btn.on{background:var(--b);color:#0e1116;border-color:var(--b)}.btn.skip.on{background:#555;border-color:#555;color:#fff}
 #side{width:min(55%,780px);border-left:1px solid var(--line);display:none;flex-direction:column;background:var(--bg)}
 #side.show{display:flex}#sh{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
@@ -34,13 +36,14 @@ footer{padding:6px 16px;border-top:1px solid var(--line);color:var(--mut);font-s
 <label>Arah <select id="fSide"><option value="">Bull + Bear</option><option value="bull">Bull (naik)</option><option value="bear">Bear (turun)</option></select></label>
 <label>Umur maks <select id="fAge"><option value="0">0 (baru close)</option><option value="1">≤1 candle</option><option value="2">≤2 candle</option><option value="4" selected>≤4 candle</option><option value="10">≤10 candle</option></select></label>
 <label>Keputusan <select id="fDec"><option value="">Semua</option><option value="watch">Watch</option><option value="skip">Skip</option><option value="none">Belum diputuskan</option></select></label>
+<label>Konflik W/D <select id="fConf"><option value="">Semua</option><option value="only">Hanya yang konflik</option><option value="hide">Sembunyikan konflik</option></select></label>
 <label><input type="checkbox" id="fInv"> tampilkan yang sudah invalid</label>
 <input type="search" id="fQ" placeholder="cari koin…" size="12">
 <span class="m" id="cnt"></span>
 </div>
 <main>
 <div id="tbl"></div>
-<div id="side"><div id="sh"><b id="st"></b><button id="close">✕</button></div><div id="c1"></div><div id="c2"></div><div id="info"></div></div>
+<div id="side"><div id="sh"><b id="st"></b><button id="close">✕</button></div><div id="cwarn"></div><div id="c1"></div><div id="c2"></div><div id="info"></div></div>
 </main>
 <footer>Sinyal = candle crossing K/D yang sudah CLOSE (final). Umur 0 = candle terakhir yang sudah close. Invalid = harga sudah menembus ekstrem puncak 2. Ini alat screening, bukan saran trading; keputusan ada di kamu. Backtest historis menunjukkan edge divergence kecil dan tidak stabil, terutama di daily.</footer>
 <script>
@@ -51,13 +54,19 @@ const store={get(){try{return JSON.parse(localStorage.getItem('dec')||'{}')}catc
 const key=s=>`${s.symbol}|${s.tf}|${s.signal_time}|${s.kind}|${s.side}`;
 const fmtP=p=>p>=100?p.toFixed(2):p>=1?p.toFixed(3):p.toPrecision(4);
 const fmtD=t=>new Date(t*1000).toISOString().slice(0,10);
-fetch('data/signals.json?'+Date.now()).then(r=>r.json()).then(d=>{DATA=d;
+// A coin is in CONFLICT when it has a valid weekly divergence one way and a valid daily divergence the other way.
+const CONF={};
+function computeConf(){const by={};DATA.signals.filter(s=>!s.invalid).forEach(s=>{(by[s.symbol]=by[s.symbol]||{})[s.tf]=by[s.symbol][s.tf]||new Set();by[s.symbol][s.tf].add(s.side)});
+ Object.entries(by).forEach(([sym,o])=>{const w=o['1w'],d=o['1d'];if(!w||!d)return;
+  const parts=[];w.forEach(a=>d.forEach(b=>{if(a!=b)parts.push(`Weekly ${a=='bull'?'BULL (naik)':'BEAR (turun)'} vs Daily ${b=='bull'?'BULL (naik)':'BEAR (turun)'}`)}));
+  if(parts.length)CONF[sym]=[...new Set(parts)].join('; ')})}
+fetch('data/signals.json?'+Date.now()).then(r=>r.json()).then(d=>{DATA=d;computeConf();
  const g=new Date(d.generated_at);$('upd').textContent=`update terakhir ${g.toLocaleString('id-ID')} · ${d.universe} koin · ${d.signals.length} sinyal`+(d.failed?` · ${d.failed} download gagal`:'');render()})
  .catch(e=>{$('upd').textContent='gagal memuat data';$('tbl').innerHTML='<div class="empty">data/signals.json belum ada. Jalankan scanner dulu.</div>'});
-['fTf','fKind','fSide','fAge','fDec','fInv','fQ'].forEach(i=>$(i).addEventListener(i=='fQ'?'input':'change',render));
+['fTf','fKind','fSide','fAge','fDec','fConf','fInv','fQ'].forEach(i=>$(i).addEventListener(i=='fQ'?'input':'change',render));
 function rows(){const dec=store.get(),q=$('fQ').value.trim().toUpperCase(),age=+$('fAge').value;
  return DATA.signals.filter(s=>(!$('fTf').value||s.tf==$('fTf').value)&&(!$('fKind').value||s.kind==$('fKind').value)&&(!$('fSide').value||s.side==$('fSide').value)
-  &&s.age<=age&&($('fInv').checked||!s.invalid)&&(!q||s.symbol.includes(q)||s.name.toUpperCase().includes(q))
+  &&s.age<=age&&($('fInv').checked||!s.invalid)&&(!$('fConf').value||($('fConf').value=='only'?!!CONF[s.symbol]:!CONF[s.symbol]))&&(!q||s.symbol.includes(q)||s.name.toUpperCase().includes(q))
   &&(!$('fDec').value||($('fDec').value=='none'?!dec[key(s)]:dec[key(s)]==$('fDec').value)))}
 const COLS=[['rank','#'],['symbol','Koin'],['tf','TF'],['kind','Tipe'],['side','Arah'],['age','Umur'],['signal_time','Sinyal'],['price','Harga'],['move_pct','Gerak sejak sinyal'],['stop_dist_pct','Stop (puncak 2)'],['invalid','Status'],['dec','Keputusan']];
 function render(){if(!DATA)return;const dec=store.get();let R=rows();
@@ -66,7 +75,7 @@ function render(){if(!DATA)return;const dec=store.get();let R=rows();
  if(!R.length){$('tbl').innerHTML='<div class="empty">Tidak ada sinyal dengan filter ini.</div>';return}
  let h='<table><thead><tr>'+COLS.map(([k,n])=>`<th data-k="${k}">${n}${sortK==k?(sortD>0?' ▲':' ▼'):''}</th>`).join('')+'</tr></thead><tbody>';
  R.forEach(s=>{const c=COL[s.kind+'|'+s.side],k=key(s),d=dec[k]||'';
-  h+=`<tr class="row${s.invalid?' inv':''}${sel==k?' on':''}" data-k="${k}"><td class="m">${s.rank}</td><td><b>${s.symbol}</b> <span class="m">${s.name}</span></td>
+  h+=`<tr class="row${s.invalid?' inv':''}${sel==k?' on':''}" data-k="${k}"><td class="m">${s.rank}</td><td><b>${s.symbol}</b> <span class="m">${s.name}</span>${CONF[s.symbol]?`<span class="pill conf" title="${CONF[s.symbol]}">⚠ konflik W/D</span>`:''}</td>
   <td>${s.tf=='1w'?'W':'D'}</td><td><span class="pill" style="background:${c}">${s.kind}${s.skip?' 1→3':''}</span></td>
   <td class="${s.side=='bull'?'up':'dn'}">${s.side=='bull'?'▲ naik':'▼ turun'}</td><td>${s.age==0?'baru':s.age+' candle'}</td><td class="m">${fmtD(s.signal_time)}</td>
   <td>${fmtP(s.price)}</td><td class="${s.move_pct>=0?'up':'dn'}">${s.move_pct>=0?'+':''}${s.move_pct.toFixed(1)}%</td>
@@ -82,8 +91,9 @@ const opt={autoSize:true,layout:{background:{color:'#0e1116'},textColor:'#8b96a5
  rightPriceScale:{minimumWidth:70,borderColor:'#2a313c'},timeScale:{borderColor:'#2a313c'},crosshair:{mode:0}};
 const ch1=LightweightCharts.createChart($('c1'),opt),ch2=LightweightCharts.createChart($('c2'),opt);
 const cs=ch1.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
-const sK=ch2.addLineSeries({color:'#42a5f5',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
-const sD=ch2.addLineSeries({color:'#ffa726',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const fixed01={autoscaleInfoProvider:()=>({priceRange:{minValue:0,maxValue:100}})};   // stochastic pane is always 0-100
+const sK=ch2.addLineSeries({color:'#42a5f5',lineWidth:1,priceLineVisible:false,lastValueVisible:false,...fixed01});
+const sD=ch2.addLineSeries({color:'#ffa726',lineWidth:1,priceLineVisible:false,lastValueVisible:false,...fixed01});
 [60,40].forEach(v=>sK.createPriceLine({price:v,color:'#555',lineWidth:1,lineStyle:2,axisLabelVisible:true}));
 let extra=[],kmap=new Map(),cmap=new Map(),lock=false,xh=false;
 ch1.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(lock||!r)return;lock=true;ch2.timeScale().setVisibleLogicalRange(r);lock=false});
@@ -106,6 +116,13 @@ function show(s){sel=key(s);$('side').classList.add('show');document.querySelect
  const up=s.side=='bull';cs.setMarkers([{time:s.signal_time,position:up?'belowBar':'aboveBar',color:c,shape:up?'arrowUp':'arrowDown',text:'sinyal'}]);
  $('st').innerHTML=`${s.symbol}USDT · ${s.tf=='1w'?'Weekly':'Daily'} · <span style="color:${c}">${s.kind} ${s.side}${s.skip?' (1→3)':''}</span>`;
  $('info').innerHTML=`Sinyal ${fmtD(s.signal_time)} (${s.age==0?'candle terakhir':s.age+' candle lalu'}). Puncak 1: ${fmtD(s.p1[0])} @ ${fmtP(s.p1[1])} · K ${s.p1[3].toFixed(0)}. Puncak 2: ${fmtD(s.p2[0])} @ ${fmtP(s.p2[1])} · K ${s.p2[3].toFixed(0)}. Garis merah putus-putus = stop (ekstrem puncak 2) ${fmtP(s.stop)}, ${s.stop_dist_pct.toFixed(1)}% dari harga. Stoch sekarang K ${s.k_now.toFixed(0)} / D ${s.d_now.toFixed(0)}.`;
- setTimeout(()=>{ch1.timeScale().fitContent();const n=C.t.length;ch1.timeScale().setVisibleLogicalRange({from:Math.max(0,n-70),to:n+3})},30)}
+ const cw=$('cwarn');if(CONF[s.symbol]){cw.style.display='block';cw.textContent='⚠ Konflik timeframe di '+s.symbol+': '+CONF[s.symbol]}else cw.style.display='none';
+ // every coin has its own price range (TAO ~200, ETH ~2000): drop any manual price-axis zoom/drag of the previous coin and refit
+ const refit=()=>{[ch1,ch2].forEach(c=>c.priceScale('right').applyOptions({autoScale:true}));const n=C.t.length;
+  ch1.timeScale().setVisibleLogicalRange({from:Math.max(0,n-70),to:n+3});
+  [ch1,ch2].forEach(c=>c.priceScale('right').applyOptions({autoScale:true}))};
+ curFit=refit;refit();setTimeout(refit,60);setTimeout(refit,300);setTimeout(()=>{if(curFit===refit)curFit=null},800)}
+// the panel may still be resizing right after it opens: re-apply the fit when the chart size settles
+let curFit=null;new ResizeObserver(()=>{if(curFit)curFit()}).observe($('c1'));
 $('close').onclick=()=>{$('side').classList.remove('show');sel=null;render()};
 </script></body></html>
