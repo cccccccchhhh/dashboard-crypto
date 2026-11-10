@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Divergence Screener</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--line:#2a313c;--tx:#d7dde5;--mut:#8b96a5;--g:#26a69a;--r:#ef5350;--o:#ffa726;--b:#42a5f5;--hl:#1f2630}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--tx);font:13px/1.4 system-ui,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+header h1{font-size:15px;margin:0}.m{color:var(--mut)}
+.bar{padding:8px 16px;border-bottom:1px solid var(--line);display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+select,button,input[type=search]{background:var(--bg);color:var(--tx);border:1px solid var(--line);padding:4px 8px;border-radius:4px;font:inherit}
+label{cursor:pointer;white-space:nowrap}
+main{flex:1;display:flex;min-height:0}
+#tbl{flex:1;overflow:auto;min-width:0}
+table{border-collapse:collapse;width:100%}th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--panel);cursor:pointer;user-select:none;z-index:1;font-weight:600}
+tr.row{cursor:pointer}tr.row:hover,tr.row.on{background:var(--hl)}tr.inv{opacity:.5}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;color:#0e1116}
+.up{color:var(--g)}.dn{color:var(--r)}
+.btn{padding:2px 7px;font-size:11px}.btn.on{background:var(--b);color:#0e1116;border-color:var(--b)}.btn.skip.on{background:#555;border-color:#555;color:#fff}
+#side{width:min(55%,780px);border-left:1px solid var(--line);display:none;flex-direction:column;background:var(--bg)}
+#side.show{display:flex}#sh{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+#c1{flex:3;min-height:0;position:relative;overflow:hidden}#c2{flex:1.2;min-height:0;position:relative;overflow:hidden;border-top:1px solid var(--line)}
+#info{padding:8px 12px;border-top:1px solid var(--line);color:var(--mut);font-size:12px}
+.empty{padding:40px;text-align:center;color:var(--mut)}
+footer{padding:6px 16px;border-top:1px solid var(--line);color:var(--mut);font-size:11px}
+@media(max-width:900px){main{flex-direction:column}#side{width:100%;height:60%;border-left:0;border-top:1px solid var(--line)}}
+</style></head><body>
+<header><h1>Divergence Screener · Stochastic 5,3,3 · Top 100</h1><span class="m" id="upd">memuat…</span></header>
+<div class="bar">
+<label>TF <select id="fTf"><option value="">Weekly + Daily</option><option value="1w">Weekly</option><option value="1d">Daily</option></select></label>
+<label>Tipe <select id="fKind"><option value="">Regular + Hidden</option><option value="regular">Regular</option><option value="hidden">Hidden</option></select></label>
+<label>Arah <select id="fSide"><option value="">Bull + Bear</option><option value="bull">Bull (naik)</option><option value="bear">Bear (turun)</option></select></label>
+<label>Umur maks <select id="fAge"><option value="0">0 (baru close)</option><option value="1">≤1 candle</option><option value="2">≤2 candle</option><option value="4" selected>≤4 candle</option><option value="10">≤10 candle</option></select></label>
+<label>Keputusan <select id="fDec"><option value="">Semua</option><option value="watch">Watch</option><option value="skip">Skip</option><option value="none">Belum diputuskan</option></select></label>
+<label><input type="checkbox" id="fInv"> tampilkan yang sudah invalid</label>
+<input type="search" id="fQ" placeholder="cari koin…" size="12">
+<span class="m" id="cnt"></span>
+</div>
+<main>
+<div id="tbl"></div>
+<div id="side"><div id="sh"><b id="st"></b><button id="close">✕</button></div><div id="c1"></div><div id="c2"></div><div id="info"></div></div>
+</main>
+<footer>Sinyal = candle crossing K/D yang sudah CLOSE (final). Umur 0 = candle terakhir yang sudah close. Invalid = harga sudah menembus ekstrem puncak 2. Ini alat screening, bukan saran trading; keputusan ada di kamu. Backtest historis menunjukkan edge divergence kecil dan tidak stabil, terutama di daily.</footer>
+<script>
+const COL={'regular|bear':'#ef5350','regular|bull':'#26a69a','hidden|bear':'#ffa726','hidden|bull':'#42a5f5'};
+const $=id=>document.getElementById(id);
+let DATA=null,sel=null,sortK='age',sortD=1;
+const store={get(){try{return JSON.parse(localStorage.getItem('dec')||'{}')}catch(e){return{}}},set(o){try{localStorage.setItem('dec',JSON.stringify(o))}catch(e){}}};
+const key=s=>`${s.symbol}|${s.tf}|${s.signal_time}|${s.kind}|${s.side}`;
+const fmtP=p=>p>=100?p.toFixed(2):p>=1?p.toFixed(3):p.toPrecision(4);
+const fmtD=t=>new Date(t*1000).toISOString().slice(0,10);
+fetch('data/signals.json?'+Date.now()).then(r=>r.json()).then(d=>{DATA=d;
+ const g=new Date(d.generated_at);$('upd').textContent=`update terakhir ${g.toLocaleString('id-ID')} · ${d.universe} koin · ${d.signals.length} sinyal`+(d.failed?` · ${d.failed} download gagal`:'');render()})
+ .catch(e=>{$('upd').textContent='gagal memuat data';$('tbl').innerHTML='<div class="empty">data/signals.json belum ada. Jalankan scanner dulu.</div>'});
+['fTf','fKind','fSide','fAge','fDec','fInv','fQ'].forEach(i=>$(i).addEventListener(i=='fQ'?'input':'change',render));
+function rows(){const dec=store.get(),q=$('fQ').value.trim().toUpperCase(),age=+$('fAge').value;
+ return DATA.signals.filter(s=>(!$('fTf').value||s.tf==$('fTf').value)&&(!$('fKind').value||s.kind==$('fKind').value)&&(!$('fSide').value||s.side==$('fSide').value)
+  &&s.age<=age&&($('fInv').checked||!s.invalid)&&(!q||s.symbol.includes(q)||s.name.toUpperCase().includes(q))
+  &&(!$('fDec').value||($('fDec').value=='none'?!dec[key(s)]:dec[key(s)]==$('fDec').value)))}
+const COLS=[['rank','#'],['symbol','Koin'],['tf','TF'],['kind','Tipe'],['side','Arah'],['age','Umur'],['signal_time','Sinyal'],['price','Harga'],['move_pct','Gerak sejak sinyal'],['stop_dist_pct','Stop (puncak 2)'],['invalid','Status'],['dec','Keputusan']];
+function render(){if(!DATA)return;const dec=store.get();let R=rows();
+ R.sort((a,b)=>{const x=sortK=='dec'?(dec[key(a)]||''):a[sortK],y=sortK=='dec'?(dec[key(b)]||''):b[sortK];return (x>y?1:x<y?-1:0)*sortD||a.rank-b.rank});
+ $('cnt').textContent=R.length+' sinyal';
+ if(!R.length){$('tbl').innerHTML='<div class="empty">Tidak ada sinyal dengan filter ini.</div>';return}
+ let h='<table><thead><tr>'+COLS.map(([k,n])=>`<th data-k="${k}">${n}${sortK==k?(sortD>0?' ▲':' ▼'):''}</th>`).join('')+'</tr></thead><tbody>';
+ R.forEach(s=>{const c=COL[s.kind+'|'+s.side],k=key(s),d=dec[k]||'';
+  h+=`<tr class="row${s.invalid?' inv':''}${sel==k?' on':''}" data-k="${k}"><td class="m">${s.rank}</td><td><b>${s.symbol}</b> <span class="m">${s.name}</span></td>
+  <td>${s.tf=='1w'?'W':'D'}</td><td><span class="pill" style="background:${c}">${s.kind}${s.skip?' 1→3':''}</span></td>
+  <td class="${s.side=='bull'?'up':'dn'}">${s.side=='bull'?'▲ naik':'▼ turun'}</td><td>${s.age==0?'baru':s.age+' candle'}</td><td class="m">${fmtD(s.signal_time)}</td>
+  <td>${fmtP(s.price)}</td><td class="${s.move_pct>=0?'up':'dn'}">${s.move_pct>=0?'+':''}${s.move_pct.toFixed(1)}%</td>
+  <td>${fmtP(s.stop)} <span class="m">(${s.stop_dist_pct.toFixed(1)}%)</span></td><td>${s.invalid?'<span class="dn">invalid</span>':'<span class="up">valid</span>'}</td>
+  <td><button class="btn watch${d=='watch'?' on':''}" data-d="watch">watch</button> <button class="btn skip${d=='skip'?' on':''}" data-d="skip">skip</button></td></tr>`});
+ $('tbl').innerHTML=h+'</tbody></table>';
+ $('tbl').querySelectorAll('th').forEach(t=>t.onclick=()=>{const k=t.dataset.k;sortD=sortK==k?-sortD:1;sortK=k;render()});
+ $('tbl').querySelectorAll('tr.row').forEach(tr=>tr.onclick=e=>{const k=tr.dataset.k;
+  if(e.target.dataset.d){const o=store.get();o[k]=o[k]==e.target.dataset.d?undefined:e.target.dataset.d;store.set(o);render();return}
+  show(R.find(s=>key(s)==k))})}
+// ---- chart panel
+const opt={autoSize:true,layout:{background:{color:'#0e1116'},textColor:'#8b96a5'},grid:{vertLines:{color:'#1a2029'},horzLines:{color:'#1a2029'}},
+ rightPriceScale:{minimumWidth:70,borderColor:'#2a313c'},timeScale:{borderColor:'#2a313c'},crosshair:{mode:0}};
+const ch1=LightweightCharts.createChart($('c1'),opt),ch2=LightweightCharts.createChart($('c2'),opt);
+const cs=ch1.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',wickUpColor:'#26a69a',wickDownColor:'#ef5350',borderVisible:false});
+const sK=ch2.addLineSeries({color:'#42a5f5',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const sD=ch2.addLineSeries({color:'#ffa726',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+[60,40].forEach(v=>sK.createPriceLine({price:v,color:'#555',lineWidth:1,lineStyle:2,axisLabelVisible:true}));
+let extra=[],kmap=new Map(),cmap=new Map(),lock=false,xh=false;
+ch1.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(lock||!r)return;lock=true;ch2.timeScale().setVisibleLogicalRange(r);lock=false});
+ch2.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(lock||!r)return;lock=true;ch1.timeScale().setVisibleLogicalRange(r);lock=false});
+ch1.subscribeCrosshairMove(p=>{if(xh)return;xh=true;try{p.time&&kmap.has(p.time)?ch2.setCrosshairPosition(kmap.get(p.time),p.time,sK):ch2.clearCrosshairPosition()}catch(e){}xh=false});
+ch2.subscribeCrosshairMove(p=>{if(xh)return;xh=true;try{p.time&&cmap.has(p.time)?ch1.setCrosshairPosition(cmap.get(p.time),p.time,cs):ch1.clearCrosshairPosition()}catch(e){}xh=false});
+function ln(ch,pts,color,w,st){const s=ch.addLineSeries({color,lineWidth:w,lineStyle:st||0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});s.setData(pts.sort((a,b)=>a.time-b.time));extra.push([ch,s])}
+function show(s){sel=key(s);$('side').classList.add('show');document.querySelectorAll('tr.row').forEach(r=>r.classList.toggle('on',r.dataset.k==sel));
+ const C=DATA.charts[s.symbol+'|'+s.tf],c=COL[s.kind+'|'+s.side];
+ extra.forEach(([ch,x])=>{try{ch.removeSeries(x)}catch(e){}});extra=[];
+ cs.setData(C.t.map((t,i)=>({time:t,open:C.o[i],high:C.h[i],low:C.l[i],close:C.c[i]})));
+ sK.setData(C.t.map((t,i)=>C.k[i]==null?null:{time:t,value:C.k[i]}).filter(Boolean));sD.setData(C.t.map((t,i)=>C.d[i]==null?null:{time:t,value:C.d[i]}).filter(Boolean));
+ kmap=new Map(C.t.map((t,i)=>[t,C.k[i]]).filter(x=>x[1]!=null));cmap=new Map(C.t.map((t,i)=>[t,C.c[i]]));
+ const vis=t=>t>=C.t[0];
+ if(vis(s.p1[0])&&vis(s.p2[0]))ln(ch1,[{time:s.p1[0],value:s.p1[1]},{time:s.p2[0],value:s.p2[1]}],c,3);
+ if(vis(s.p1[2])&&vis(s.p2[2]))ln(ch2,[{time:s.p1[2],value:s.p1[3]},{time:s.p2[2],value:s.p2[3]}],c,3);
+ if(s.mid&&vis(s.p1[0])){ln(ch1,[{time:s.p1[0],value:s.p1[1]},{time:s.mid[0],value:s.mid[1]},{time:s.p2[0],value:s.p2[1]}],'#888',1,2);
+  ln(ch2,[{time:s.p1[2],value:s.p1[3]},{time:s.mid[2],value:s.mid[3]},{time:s.p2[2],value:s.p2[3]}],'#888',1,2)}
+ ln(ch1,[{time:s.signal_time,value:s.stop},{time:C.t[C.t.length-1],value:s.stop}],'#ef5350',1,2);
+ const up=s.side=='bull';cs.setMarkers([{time:s.signal_time,position:up?'belowBar':'aboveBar',color:c,shape:up?'arrowUp':'arrowDown',text:'sinyal'}]);
+ $('st').innerHTML=`${s.symbol}USDT · ${s.tf=='1w'?'Weekly':'Daily'} · <span style="color:${c}">${s.kind} ${s.side}${s.skip?' (1→3)':''}</span>`;
+ $('info').innerHTML=`Sinyal ${fmtD(s.signal_time)} (${s.age==0?'candle terakhir':s.age+' candle lalu'}). Puncak 1: ${fmtD(s.p1[0])} @ ${fmtP(s.p1[1])} · K ${s.p1[3].toFixed(0)}. Puncak 2: ${fmtD(s.p2[0])} @ ${fmtP(s.p2[1])} · K ${s.p2[3].toFixed(0)}. Garis merah putus-putus = stop (ekstrem puncak 2) ${fmtP(s.stop)}, ${s.stop_dist_pct.toFixed(1)}% dari harga. Stoch sekarang K ${s.k_now.toFixed(0)} / D ${s.d_now.toFixed(0)}.`;
+ setTimeout(()=>{ch1.timeScale().fitContent();const n=C.t.length;ch1.timeScale().setVisibleLogicalRange({from:Math.max(0,n-70),to:n+3})},30)}
+$('close').onclick=()=>{$('side').classList.remove('show');sel=null;render()};
+</script></body></html>
