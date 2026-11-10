@@ -22,6 +22,7 @@ tr.row{cursor:pointer}tr.row:hover,tr.row.on{background:var(--hl)}tr.inv{opacity
 #cwarn{display:none;padding:6px 12px;background:#3a2f00;color:#f5c518;border-bottom:1px solid var(--line);font-size:12px}
 .btn{padding:2px 7px;font-size:11px}.btn.on{background:var(--b);color:#0e1116;border-color:var(--b)}.btn.skip.on{background:#555;border-color:#555;color:#fff}
 #side{width:min(55%,780px);border-left:1px solid var(--line);display:none;flex-direction:column;background:var(--bg)}
+#tfb button.on{background:var(--b);color:#0e1116;border-color:var(--b)}#tfb{margin-left:auto;margin-right:8px}
 #side.show{display:flex}#sh{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
 #c1{flex:3;min-height:0;position:relative;overflow:hidden}#c2{flex:1.2;min-height:0;position:relative;overflow:hidden;border-top:1px solid var(--line)}
 #info{padding:8px 12px;border-top:1px solid var(--line);color:var(--mut);font-size:12px}
@@ -43,7 +44,7 @@ footer{padding:6px 16px;border-top:1px solid var(--line);color:var(--mut);font-s
 </div>
 <main>
 <div id="tbl"></div>
-<div id="side"><div id="sh"><b id="st"></b><button id="close">✕</button></div><div id="cwarn"></div><div id="c1"></div><div id="c2"></div><div id="info"></div></div>
+<div id="side"><div id="sh"><b id="st"></b><span id="tfb"><button data-tf="1w">W</button> <button data-tf="1d">D</button> <button data-tf="4h">4H</button></span><button id="close">✕</button></div><div id="cwarn"></div><div id="c1"></div><div id="c2"></div><div id="info"></div></div>
 </main>
 <footer>Sinyal = candle crossing K/D yang sudah CLOSE (final). Umur 0 = candle terakhir yang sudah close. Invalid = harga sudah menembus ekstrem puncak 2. Ini alat screening, bukan saran trading; keputusan ada di kamu. Backtest historis menunjukkan edge divergence kecil dan tidak stabil, terutama di daily.</footer>
 <script>
@@ -101,26 +102,87 @@ ch2.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(lock||!r)return;lock=t
 ch1.subscribeCrosshairMove(p=>{if(xh)return;xh=true;try{p.time&&kmap.has(p.time)?ch2.setCrosshairPosition(kmap.get(p.time),p.time,sK):ch2.clearCrosshairPosition()}catch(e){}xh=false});
 ch2.subscribeCrosshairMove(p=>{if(xh)return;xh=true;try{p.time&&cmap.has(p.time)?ch1.setCrosshairPosition(cmap.get(p.time),p.time,cs):ch1.clearCrosshairPosition()}catch(e){}xh=false});
 function ln(ch,pts,color,w,st){const s=ch.addLineSeries({color,lineWidth:w,lineStyle:st||0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});s.setData(pts.sort((a,b)=>a.time-b.time));extra.push([ch,s])}
-function show(s){sel=key(s);$('side').classList.add('show');document.querySelectorAll('tr.row').forEach(r=>r.classList.toggle('on',r.dataset.k==sel));
- const C=DATA.charts[s.symbol+'|'+s.tf],c=COL[s.kind+'|'+s.side];
- extra.forEach(([ch,x])=>{try{ch.removeSeries(x)}catch(e){}});extra=[];
- cs.setData(C.t.map((t,i)=>({time:t,open:C.o[i],high:C.h[i],low:C.l[i],close:C.c[i]})));
- sK.setData(C.t.map((t,i)=>C.k[i]==null?null:{time:t,value:C.k[i]}).filter(Boolean));sD.setData(C.t.map((t,i)=>C.d[i]==null?null:{time:t,value:C.d[i]}).filter(Boolean));
- kmap=new Map(C.t.map((t,i)=>[t,C.k[i]]).filter(x=>x[1]!=null));cmap=new Map(C.t.map((t,i)=>[t,C.c[i]]));
- const vis=t=>t>=C.t[0];
- if(vis(s.p1[0])&&vis(s.p2[0]))ln(ch1,[{time:s.p1[0],value:s.p1[1]},{time:s.p2[0],value:s.p2[1]}],c,3);
- if(vis(s.p1[2])&&vis(s.p2[2]))ln(ch2,[{time:s.p1[2],value:s.p1[3]},{time:s.p2[2],value:s.p2[3]}],c,3);
- if(s.mid&&vis(s.p1[0])){ln(ch1,[{time:s.p1[0],value:s.p1[1]},{time:s.mid[0],value:s.mid[1]},{time:s.p2[0],value:s.p2[1]}],'#888',1,2);
-  ln(ch2,[{time:s.p1[2],value:s.p1[3]},{time:s.mid[2],value:s.mid[3]},{time:s.p2[2],value:s.p2[3]}],'#888',1,2)}
- ln(ch1,[{time:s.signal_time,value:s.stop},{time:C.t[C.t.length-1],value:s.stop}],'#ef5350',1,2);
- const up=s.side=='bull';cs.setMarkers([{time:s.signal_time,position:up?'belowBar':'aboveBar',color:c,shape:up?'arrowUp':'arrowDown',text:'sinyal'}]);
- $('st').innerHTML=`${s.symbol}USDT · ${s.tf=='1w'?'Weekly':'Daily'} · <span style="color:${c}">${s.kind} ${s.side}${s.skip?' (1→3)':''}</span>`;
- $('info').innerHTML=`Sinyal ${fmtD(s.signal_time)} (${s.age==0?'candle terakhir':s.age+' candle lalu'}). Puncak 1: ${fmtD(s.p1[0])} @ ${fmtP(s.p1[1])} · K ${s.p1[3].toFixed(0)}. Puncak 2: ${fmtD(s.p2[0])} @ ${fmtP(s.p2[1])} · K ${s.p2[3].toFixed(0)}. Garis merah putus-putus = stop (ekstrem puncak 2) ${fmtP(s.stop)}, ${s.stop_dist_pct.toFixed(1)}% dari harga. Stoch sekarang K ${s.k_now.toFixed(0)} / D ${s.d_now.toFixed(0)}.`;
+// ---- timeframe switcher: candles come live from Binance (public API) and the divergence detector runs in the browser
+const TFN={'1w':'Weekly','1d':'Daily','4h':'4H'},MAXGAP={'1w':26,'1d':60,'4h':60},cache=new Map();
+let cur=null,curTf=null,shownTf=null,reqId=0;
+function sma(a,n){const o=new Array(a.length).fill(NaN);for(let i=n-1;i<a.length;i++){let s=0,ok=true;for(let j=i-n+1;j<=i;j++){if(isNaN(a[j])){ok=false;break}s+=a[j]}if(ok)o[i]=s/n}return o}
+function stochJS(B){const n=B.length,raw=new Array(n).fill(NaN);
+ for(let i=4;i<n;i++){let hh=-Infinity,ll=Infinity;for(let j=i-4;j<=i;j++){hh=Math.max(hh,B[j].h);ll=Math.min(ll,B[j].l)}raw[i]=hh==ll?NaN:(B[i].c-ll)/(hh-ll)*100}
+ const k=sma(raw,3);return[k,sma(k,3)]}
+function atrJS(B){const tr=B.map((x,i)=>i?Math.max(x.h-x.l,Math.abs(x.h-B[i-1].c),Math.abs(x.l-B[i-1].c)):x.h-x.l);return sma(tr,14)}
+function cmpJS(side,peaks,nw,a,P){
+ const cls=pv=>{const kd=nw.k-pv.k;
+  if(side=='bear'){if(nw.px>pv.px&&kd<-P.mk)return'regular';if(nw.px<pv.px&&kd>P.mk)return'hidden'}
+  else{if(nw.px<pv.px&&kd>P.mk)return'regular';if(nw.px>pv.px&&kd<-P.mk)return'hidden'}return null};
+ if(peaks.length){const pv=peaks[peaks.length-1];if(nw.pbar-pv.pbar<=P.gap){const kind=cls(pv);if(kind)return{bar:nw.bar,side,kind,p1:pv,p2:nw,mid:null}}}
+ if(peaks.length>=2){const p1=peaks[peaks.length-2],mid=peaks[peaks.length-1],at=a[mid.pbar],tol=isNaN(at)?0:P.minor*at;
+  if(Math.abs(mid.px-p1.px)<=tol&&nw.pbar-p1.pbar<=P.gap){const kind=cls(p1);if(kind)return{bar:nw.bar,side,kind,p1,p2:nw,mid}}}
+ return null}
+function detectJS(B,k,d,a,tf){const P={ob:60,mk:3,gap:MAXGAP[tf],minor:.5},n=B.length,out=[];
+ for(const side of['bear','bull']){const sign=side=='bear'?1:-1;let peaks=[],start=null;
+  for(let i=1;i<n;i++){
+   if(isNaN(k[i])||isNaN(d[i])){start=null;continue}
+   if(sign*(k[i]-d[i])>0){if(start===null)start=i;continue}
+   if(start===null)continue;
+   let kv=side=='bear'?-Infinity:Infinity,pv=kv,pb=start,kb=start;
+   for(let j=start;j<i;j++){
+    if(side=='bear'){if(k[j]>kv){kv=k[j];kb=j}if(B[j].h>pv){pv=B[j].h;pb=j}}
+    else{if(k[j]<kv){kv=k[j];kb=j}if(B[j].l<pv){pv=B[j].l;pb=j}}}
+   start=null;
+   if(!(side=='bear'?kv>=P.ob:kv<=100-P.ob))continue;
+   const nw={bar:i,k:kv,px:pv,pbar:pb,kbar:kb},sg=cmpJS(side,peaks,nw,a,P);
+   if(sg)out.push(sg);peaks.push(nw);if(peaks.length>3)peaks.shift()}}
+ return out.sort((x,y)=>x.bar-y.bar)}
+async function bars(sym,tf){const key2=sym+'|'+tf,hit=cache.get(key2);if(hit&&Date.now()-hit.at<5*60e3)return hit.B;
+ const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${sym}USDT&interval=${tf}&limit=500`);if(!r.ok)throw new Error('http '+r.status);
+ const now=Date.now(),B=(await r.json()).filter(x=>x[6]<now).map(x=>({t:Math.floor(x[0]/1000),o:+x[1],h:+x[2],l:+x[3],c:+x[4]}));
+ cache.set(key2,{at:Date.now(),B});return B}
+function embedded(s){const C=DATA.charts[s.symbol+'|'+s.tf];return C.t.map((t,i)=>({t,o:C.o[i],h:C.h[i],l:C.l[i],c:C.c[i]}))}
+function setTfButtons(){document.querySelectorAll('#tfb button').forEach(b=>b.classList.toggle('on',b.dataset.tf==curTf))}
+document.querySelectorAll('#tfb button').forEach(b=>b.onclick=()=>{if(cur)view(b.dataset.tf)});
+function show(s){cur=s;sel=key(s);$('side').classList.add('show');document.querySelectorAll('tr.row').forEach(r=>r.classList.toggle('on',r.dataset.k==sel));
  const cw=$('cwarn');if(CONF[s.symbol]){cw.style.display='block';cw.textContent='⚠ Konflik timeframe di '+s.symbol+': '+CONF[s.symbol]}else cw.style.display='none';
- // every coin has its own price range (TAO ~200, ETH ~2000): drop any manual price-axis zoom/drag of the previous coin and refit
- const refit=()=>{[ch1,ch2].forEach(c=>c.priceScale('right').applyOptions({autoScale:true}));const n=C.t.length;
-  ch1.timeScale().setVisibleLogicalRange({from:Math.max(0,n-70),to:n+3});
-  [ch1,ch2].forEach(c=>c.priceScale('right').applyOptions({autoScale:true}))};
+ view(s.tf)}
+async function view(tf){const s=cur,my=++reqId;curTf=tf;setTfButtons();$('info').textContent='memuat '+TFN[tf]+'…';
+ let B,live=true;
+ try{B=await bars(s.symbol,tf)}catch(e){live=false;
+  if(tf==s.tf)B=embedded(s);
+  else{if(my==reqId){curTf=shownTf;setTfButtons();$('info').textContent='Gagal mengambil data '+TFN[tf]+' dari Binance (koneksi atau akses diblokir). Coba lagi nanti.'}return}}
+ if(my!=reqId)return;
+ paint(s,tf,B,live)}
+function paint(s,tf,B,live){shownTf=tf;const [k,d]=stochJS(B),a=atrJS(B),n=B.length,native=tf==s.tf,c=COL[s.kind+'|'+s.side];
+ extra.forEach(([ch,x])=>{try{ch.removeSeries(x)}catch(e){}});extra=[];
+ [ch1,ch2].forEach(ch=>ch.applyOptions({timeScale:{timeVisible:tf=='4h',secondsVisible:false}}));
+ cs.setData(B.map(x=>({time:x.t,open:x.o,high:x.h,low:x.l,close:x.c})));
+ sK.setData(B.map((x,i)=>isNaN(k[i])?null:{time:x.t,value:+k[i].toFixed(2)}).filter(Boolean));
+ sD.setData(B.map((x,i)=>isNaN(d[i])?null:{time:x.t,value:+d[i].toFixed(2)}).filter(Boolean));
+ kmap=new Map(B.map((x,i)=>[x.t,k[i]]).filter(x=>!isNaN(x[1])));cmap=new Map(B.map(x=>[x.t,x.c]));
+ const markers=[];
+ // thin lines: every other divergence the same rules find on this timeframe (last 200 candles)
+ detectJS(B,k,d,a,tf).filter(x=>x.bar>=n-200).forEach(x=>{
+  const col=COL[x.kind+'|'+x.side],up=x.side=='bull';
+  if(native&&B[x.bar].t==s.signal_time&&x.side==s.side&&x.kind==s.kind)return;   // the dashboard's own signal is drawn thick below
+  ln(ch1,[{time:B[x.p1.pbar].t,value:x.p1.px},{time:B[x.p2.pbar].t,value:x.p2.px}],col,2);
+  ln(ch2,[{time:B[x.p1.kbar].t,value:x.p1.k},{time:B[x.p2.kbar].t,value:x.p2.k}],col,2);
+  if(x.mid){ln(ch1,[{time:B[x.p1.pbar].t,value:x.p1.px},{time:B[x.mid.pbar].t,value:x.mid.px},{time:B[x.p2.pbar].t,value:x.p2.px}],'#888',1,2);
+   ln(ch2,[{time:B[x.p1.kbar].t,value:x.p1.k},{time:B[x.mid.kbar].t,value:x.mid.k},{time:B[x.p2.kbar].t,value:x.p2.k}],'#888',1,2)}
+  markers.push({time:B[x.bar].t,position:up?'belowBar':'aboveBar',color:col,shape:up?'arrowUp':'arrowDown',text:x.kind=='regular'?'R':'H'})});
+ if(native){const vis=t=>t>=B[0].t,up=s.side=='bull';
+  if(vis(s.p1[0])&&vis(s.p2[0]))ln(ch1,[{time:s.p1[0],value:s.p1[1]},{time:s.p2[0],value:s.p2[1]}],c,3);
+  if(vis(s.p1[2])&&vis(s.p2[2]))ln(ch2,[{time:s.p1[2],value:s.p1[3]},{time:s.p2[2],value:s.p2[3]}],c,3);
+  if(s.mid&&vis(s.p1[0])){ln(ch1,[{time:s.p1[0],value:s.p1[1]},{time:s.mid[0],value:s.mid[1]},{time:s.p2[0],value:s.p2[1]}],'#888',1,2);
+   ln(ch2,[{time:s.p1[2],value:s.p1[3]},{time:s.mid[2],value:s.mid[3]},{time:s.p2[2],value:s.p2[3]}],'#888',1,2)}
+  ln(ch1,[{time:s.signal_time,value:s.stop},{time:B[n-1].t,value:s.stop}],'#ef5350',1,2);
+  markers.push({time:s.signal_time,position:up?'belowBar':'aboveBar',color:c,shape:up?'arrowUp':'arrowDown',text:'sinyal'})}
+ markers.sort((x,y)=>x.time-y.time);cs.setMarkers(markers.filter((m,i)=>!i||m.time!=markers[i-1].time||m.text=='sinyal'));
+ $('st').innerHTML=`${s.symbol}USDT · ${TFN[tf]}`+(native?` · <span style="color:${c}">${s.kind} ${s.side}${s.skip?' (1→3)':''}</span>`:` <span class="m">(sinyal tabel: ${TFN[s.tf]} ${s.kind} ${s.side})</span>`);
+ const note=' Garis tipis = divergence lain di TF ini (R regular, H hidden), dihitung di browser dengan aturan yang sama dengan scanner.'+(live?'':' ⚠ data Binance live gagal dimuat, memakai data terakhir dari scan.');
+ $('info').innerHTML=native?`Sinyal ${fmtD(s.signal_time)} (${s.age==0?'candle terakhir':s.age+' candle lalu'}). Puncak 1: ${fmtD(s.p1[0])} @ ${fmtP(s.p1[1])} · K ${s.p1[3].toFixed(0)}. Puncak 2: ${fmtD(s.p2[0])} @ ${fmtP(s.p2[1])} · K ${s.p2[3].toFixed(0)}. Garis merah putus-putus = stop ${fmtP(s.stop)} (${s.stop_dist_pct.toFixed(1)}% dari harga). Stoch K ${s.k_now.toFixed(0)} / D ${s.d_now.toFixed(0)}.`+note
+  :`Timeframe ${TFN[tf]} tidak termasuk daftar sinyal dashboard (yang discan hanya Weekly dan Daily).`+note;
+ // every coin has its own price range (TAO ~200, ETH ~2000): drop any manual price-axis zoom/drag and refit
+ const refit=()=>{[ch1,ch2].forEach(ch=>ch.priceScale('right').applyOptions({autoScale:true}));
+  ch1.timeScale().setVisibleLogicalRange({from:Math.max(0,n-80),to:n+3});
+  [ch1,ch2].forEach(ch=>ch.priceScale('right').applyOptions({autoScale:true}))};
  curFit=refit;refit();setTimeout(refit,60);setTimeout(refit,300);setTimeout(()=>{if(curFit===refit)curFit=null},800)}
 // the panel may still be resizing right after it opens: re-apply the fit when the chart size settles
 let curFit=null;new ResizeObserver(()=>{if(curFit)curFit()}).observe($('c1'));
