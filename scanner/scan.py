@@ -93,7 +93,7 @@ def scan_one(info: dict, rank: int, tf: str) -> tuple[list[dict], dict | None]:
         return [], None
     t = (df["open_time"].to_numpy() // 1000).astype(np.int64)
     k, d = dv.stoch(df)
-    close, hi, lo = df["close"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy()
+    close, hi, lo, opn = df["close"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy(), df["open"].to_numpy()
     out = []
     for s in dv.detect(df, dv.Params(ob=60, max_gap=MAX_GAP[tf])):
         age = n - 1 - s["bar"]
@@ -104,11 +104,13 @@ def scan_one(info: dict, rank: int, tf: str) -> tuple[list[dict], dict | None]:
         after = slice(s["bar"] + 1, n)
         invalid = bool((lo[after] <= stop).any()) if up else bool((hi[after] >= stop).any())
         ref = close[s["bar"]]
+        entry = float(opn[s["bar"] + 1]) if s["bar"] + 1 < n else None   # open of the candle after the crossing close
+        base = entry if entry is not None else float(close[-1])
         pk = lambda q: [int(t[q["pbar"]]), q["px"], int(t[q["kbar"]]), q["k"]]  # noqa: E731
         out.append({
             "symbol": info["symbol"], "name": info["name"], "rank": rank, "tf": tf, "side": s["side"], "kind": s["kind"],
             "skip": bool(s["skipped"]), "signal_time": int(t[s["bar"]]), "age": int(age), "price": float(close[-1]),
-            "ref": float(ref), "move_pct": float((close[-1] / ref - 1) * (1 if up else -1) * 100),
+            "ref": float(ref), "entry": entry, "move_pct": float((close[-1] / base - 1) * (1 if up else -1) * 100),
             "stop": float(stop), "stop_dist_pct": float(abs(close[-1] - stop) / close[-1] * 100),
             "invalid": invalid, "p1": pk(s["p1"]), "p2": pk(s["p2"]), "mid": pk(s["mid"]) if s["skipped"] else None,
             "k_now": float(k[-1]), "d_now": float(d[-1]),
