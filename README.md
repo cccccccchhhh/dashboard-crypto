@@ -1,12 +1,23 @@
 # Divergence Screener (Stochastic 5,3,3, top 100)
 
-Static dashboard + scheduled scanner.
+Static dashboard + one scheduled scan per day. No database: the history is a JSON file committed to the repo.
 
-- `scanner/scan.py` downloads closed daily/weekly candles for the top-100 coins (CoinGecko ranking, Binance USDT pairs),
-  runs the divergence detector (`scanner/divergence.py`) and writes `public/data/signals.json`.
-- `public/index.html` is the dashboard (filters, sortable table, chart with divergence lines, watch/skip decisions saved in the browser).
-- `.github/workflows/scan.yml` runs the scanner every day at 00:10 UTC (and 12:10 UTC as a retry) and commits the new JSON.
-  Vercel redeploys automatically on every push, so the dashboard updates itself.
+- `scanner/scan.py` downloads closed daily/weekly candles for the top-100 coins (CoinGecko ranking, Binance USDT pairs), runs the
+  detector (`scanner/divergence.py`) with two rule sets and records every new signal as a paper trade in `public/data/history.json`.
+  - tab **Divergence sudah cross**: divergence confirmed at the K/D crossing close.
+  - tab **Potensial crossing**: divergence visible, K/D not crossed yet, |K-D| <= 2 and shrinking, K turning toward D.
+  - Each signal is stored once (first seen). Entry = open of the next candle, stop = peak-2 extreme, TP = 2R, time stop 30 daily / 12 weekly candles.
+  - Open trades are re-evaluated every day, so a signal that leaves the screener stays in the history with its result.
+  - The first run back-fills the last 120 daily / 26 weekly candles (records flagged `live: false`).
+- `public/index.html` is the dashboard: Aktif / Histori Daily / Histori Weekly per tab, filters, chart with divergence line, entry, stop, TP,
+  watch/skip decisions (saved per browser in localStorage).
+- `.github/workflows/scan.yml` runs once a day at 00:10 UTC (07:10 WIB), right after the daily close, and commits the new JSON.
+  Vercel redeploys on every push.
+
+## Why no database
+
+History is a few hundred KB (about 5-10 new signals a day). A JSON file in git is versioned, free and good enough. A database
+(Supabase / Vercel KV) only becomes worth it if you want watch/skip decisions shared between devices or the file grows past a few MB.
 
 ## Run locally
 
@@ -19,7 +30,5 @@ python -m http.server 8000 --directory public   # open http://localhost:8000
 ## Deploy
 
 1. Push this folder to a GitHub repository (the folder itself is the repo root).
-2. In Vercel: Add New Project, import the repo. No framework, no build command; `vercel.json` sets the output directory to `public`.
-3. In the GitHub repo: Actions tab, enable workflows, run "scan-divergence" once with "Run workflow".
-
-Watch/skip decisions are stored in each browser's localStorage (not shared between devices).
+2. Vercel: import the repo (no framework, no build command; `vercel.json` sets the output directory to `public`).
+3. GitHub Actions tab: run "scan-divergence" once with "Run workflow".

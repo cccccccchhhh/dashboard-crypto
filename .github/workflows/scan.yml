@@ -2,9 +2,8 @@ name: scan-divergence
 
 on:
   schedule:
-    # 22:00 UTC = 05:00 WIB (requested morning run; scans the candles that already closed).
-    # 00:10 UTC = 07:10 WIB: daily candles close 00:00 UTC (weekly: Monday 00:00 UTC), so this run catches the newest candle.
-    - cron: "0 22 * * *"
+    # Once a day, 10 minutes after the daily candle close (00:00 UTC = 07:00 WIB), so signals are built from the same closed
+    # candles every time and never flip. Weekly candles close Monday 00:00 UTC and are picked up by the Monday run.
     - cron: "10 0 * * *"
   workflow_dispatch: {}
 
@@ -26,9 +25,9 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python scanner/scan.py
-      - name: Commit updated signals
+      - name: Commit updated history
         run: |
           git config user.name "divergence-bot"
           git config user.email "divergence-bot@users.noreply.github.com"
-          git add public/data/signals.json scanner/universe.json
-          git diff --cached --quiet || (git commit -m "chore: update divergence signals" && git push)
+          git add public/data/history.json scanner/universe.json
+          git diff --cached --quiet || (git commit -m "chore: daily divergence scan" && git pull --rebase && git push)

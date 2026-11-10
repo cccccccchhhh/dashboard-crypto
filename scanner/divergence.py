@@ -27,6 +27,8 @@ class Params:
     min_k_diff: float = 3.0   # min oscillator difference between the 2 peaks
     max_gap: int = 60         # max bars between the price extremes of the two peaks
     minor_atr: float = 0.5    # peak 2 "minor" if price extreme within this many ATR of peak 1
+    pre_proj: bool = False        # early entry also when the gap would reach 0 next bar at the current shrink rate
+    pre_gap: float | None = None  # EARLY entry: fire before the K/D cross once |K-D| has narrowed to <= pre_gap (None = wait for the cross close)
 
 
 def stoch(df: pd.DataFrame, k_len=5, k_smooth=3, d_smooth=3):
@@ -54,15 +56,34 @@ def detect(df: pd.DataFrame, p: Params = Params()) -> list[dict]:
     for side in ("bear", "bull"):
         sign = 1 if side == "bear" else -1
         peaks: list[dict] = []          # qualified, confirmed peaks (oldest -> newest)
-        start = None
+        start, fired = None, None
         for i in range(1, n):
             if np.isnan(k[i]) or np.isnan(d[i]):
-                start = None
+                start, fired = None, None
                 continue
             inside = sign * (k[i] - d[i]) > 0
             if inside:
                 if start is None:
-                    start = i
+                    start, fired = i, None
+                if p.pre_gap is not None and fired is None and i >= 2 and not np.isnan(k[i - 2]) and not np.isnan(d[i - 2]):
+                    gap, gap2 = sign * (k[i] - d[i]), sign * (k[i - 2] - d[i - 2])
+                    # gap shrinking (smaller than 2 bars ago), small enough, and K already turning back toward D
+                    gap1 = sign * (k[i - 1] - d[i - 1])
+                    close_enough = gap <= p.pre_gap or (p.pre_proj and gap <= gap1 - gap)
+                    if gap < gap2 and close_enough and sign * (k[i] - k[i - 1]) < 0:
+                        seg = slice(start, i + 1)
+                        if side == "bear":
+                            kv = float(np.max(k[seg])); pv = float(np.max(hi[seg])); pb = start + int(np.argmax(hi[seg])); kb = start + int(np.argmax(k[seg]))
+                            ok = kv >= p.ob
+                        else:
+                            kv = float(np.min(k[seg])); pv = float(np.min(lo[seg])); pb = start + int(np.argmin(lo[seg])); kb = start + int(np.argmin(k[seg]))
+                            ok = kv <= 100 - p.ob
+                        if ok:
+                            sig = _compare(side, peaks, {"bar": i, "k": kv, "px": pv, "pbar": pb, "kbar": kb}, a, p)
+                            if sig:
+                                sig["pre"] = True
+                                signals.append(sig)
+                                fired = sig
                 continue
             if start is None:
                 continue
@@ -74,11 +95,15 @@ def detect(df: pd.DataFrame, p: Params = Params()) -> list[dict]:
             else:
                 kv = float(np.min(k[seg])); pv = float(np.min(lo[seg])); pb = start + int(np.argmin(lo[seg])); kb = start + int(np.argmin(k[seg]))
                 ok = kv <= 100 - p.ob
-            start = None
+            was_fired, start, fired = fired, None, None
             if not ok:
                 continue
             new = {"bar": i, "k": kv, "px": pv, "pbar": pb, "kbar": kb}
-            sig = _compare(side, peaks, new, a, p)
+            if was_fired is not None:
+                was_fired["cross_bar"] = i          # the early signal's cross-close confirmation came at this bar
+                sig = None
+            else:
+                sig = _compare(side, peaks, new, a, p)
             if sig:
                 signals.append(sig)
             peaks.append(new)
