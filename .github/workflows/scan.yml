@@ -2,9 +2,10 @@ name: scan-divergence
 
 on:
   schedule:
-    # Once a day, 10 minutes after the daily candle close (00:00 UTC = 07:00 WIB), so signals are built from the same closed
-    # candles every time and never flip. Weekly candles close Monday 00:00 UTC and are picked up by the Monday run.
-    - cron: "10 0 * * *"
+    # Once a day, after the daily candle close (00:00 UTC = 07:00 WIB), so signals are built from the same closed candles every
+    # time and never flip. 00:25 instead of 00:00-00:10 because GitHub delays scheduled runs a lot around the top of the hour.
+    # Weekly candles close Monday 00:00 UTC and are picked up by the Monday run.
+    - cron: "25 0 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -27,7 +28,14 @@ jobs:
       - run: python scanner/scan.py
       - name: Commit updated history
         run: |
-          git config user.name "divergence-bot"
-          git config user.email "divergence-bot@users.noreply.github.com"
+          # Commit as the repo owner: Vercel (Hobby plan) refuses to deploy commits whose author is not the account owner,
+          # which is what happens with a bot identity.
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
           git add public/data/history.json scanner/universe.json
           git diff --cached --quiet || (git commit -m "chore: daily divergence scan" && git pull --rebase && git push)
+      - name: Trigger Vercel deploy (optional, most reliable)
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$HOOK" ]; then curl -fsS -X POST "$HOOK" && echo "deploy hook called"; else echo "no VERCEL_DEPLOY_HOOK secret set, relying on the git push to trigger Vercel"; fi
