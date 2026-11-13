@@ -6,7 +6,12 @@ Static dashboard + one scheduled scan per day. No database: the history is a JSO
   detector (`scanner/divergence.py`) with two rule sets and records every new signal as a paper trade in `public/data/history.json`.
   - tab **Divergence sudah cross**: divergence confirmed at the K/D crossing close.
   - tab **Potensial crossing**: divergence visible, K/D not crossed yet, |K-D| <= 2 and shrinking, K turning toward D.
-  - Each signal is stored once (first seen). Entry = open of the next candle, stop = peak-2 extreme, TP = 2R, time stop 30 daily / 12 weekly candles.
+  - Each signal is stored once (first seen). Rules v2 (from `brute_force_sr.py`): entry = open of the next candle, stop = peak-2 extreme,
+    no take profit, the trade is closed at the close of candle 4 (weekly) / 10 (daily) unless the stop hits first.
+  - Each record has `sr` = earlier rejections of the peak-2 level (250 candles, 0.5 ATR). **Core rule** (computed in the dashboard):
+    weekly + valid cross + bull + sr >= 3. Daily and bear are observation only. Test target: about 40 live core signals; fail if
+    profit factor < 1.2 or average net < 0.
+  - Bumping `RULES_VERSION` in `scan.py` replays every stored record with the new exit rule on the next run.
   - Open trades are re-evaluated every day, so a signal that leaves the screener stays in the history with its result.
   - The first run back-fills the last 120 daily / 26 weekly candles (records flagged `live: false`).
 - `public/index.html` is the dashboard: Aktif / Histori Daily / Histori Weekly per tab, filters, chart with divergence line, entry, stop, TP,

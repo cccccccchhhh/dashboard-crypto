@@ -6,9 +6,13 @@ after it is recorded. Two rule sets (tabs):
   cross : divergence confirmed at the K/D crossing close.
   pre   : "potential crossing": the divergence is already visible, K and D have NOT crossed yet, |K-D| <= PRE_GAP and shrinking,
           K already turning back toward D (see backtest_divergence_precross.py / brute_force_cross_gap.py).
-Every signal is stored once (first seen) in public/data/history.json as a paper trade: entry = open of the candle after the
-signal, stop = peak-2 extreme, take profit = 2R, time stop = 30 daily / 12 weekly candles (same rules as the backtest).
-Open trades are re-evaluated on every run, so history keeps the outcome (tp / stop / time) after a signal leaves the screener.
+Every signal is stored once (first seen) in public/data/history.json as a paper trade (rules v2, from brute_force_sr.py):
+entry = open of the candle after the signal, stop = peak-2 extreme, NO take profit, the trade is closed at the close of the
+HOLD-th candle (4 weekly / 10 daily) unless the stop hits first. Each record also carries `sr`: how many earlier times price tested
+the peak-2 level and failed to break it (strong S/R = 3 or more).
+Core rule (weekly, cross, bull, sr >= 3) is decided in the dashboard; daily is kept for observation only (no edge in the backtest).
+Open trades are re-evaluated on every run, so history keeps the outcome (stop / time) after a signal leaves the screener.
+When RULES_VERSION increases, every record is replayed with the new exit rule on the first run.
 
 First run (no history.json yet) back-fills the last BACKFILL candles so the history tabs are not empty (records flagged live=false).
     python scanner/scan.py
@@ -34,8 +38,9 @@ INFO = "https://data-api.binance.vision/api/v3/exchangeInfo"
 CG = "https://api.coingecko.com/api/v3/coins/markets"
 TOP_N = 100
 PRE_GAP = 2.0
-RR = 2.0
-HOLD = {"1w": 12, "1d": 30}
+HOLD = {"1w": 4, "1d": 10}                    # rules v2: no take profit, close the trade after this many candles unless the stop hits first
+SR_LB, SR_TOL, SR_MIN = 250, 0.5, 3           # strong S/R = at least SR_MIN earlier rejections of the peak-2 level (250 candles, 0.5 ATR)
+RULES_VERSION = 2
 MAX_GAP = {"1w": 26, "1d": 60}
 PERIOD = {"1w": 604800, "1d": 86400}
 NEW_AGE = 1                                   # a live run records signals whose signal candle is at most this old
@@ -104,6 +109,18 @@ def pk(t, q):
     return [int(t[q["pbar"]]), float(q["px"]), int(t[q["kbar"]]), float(q["k"])]
 
 
+def rejections(h, l, c, level, resistance, tol, excl_from, end):
+    """How many EARLIER times (distinct clusters >= 5 candles apart, within SR_LB candles) price tested `level` and failed to
+    break it: resistance = high reached level-tol but the candle closed below it; support = mirror image."""
+    lo = max(0, end - SR_LB)
+    hi = min(excl_from, end)
+    if hi <= lo:
+        return 0
+    m = (h[lo:hi] >= level - tol) & (c[lo:hi] < level) if resistance else (l[lo:hi] <= level + tol) & (c[lo:hi] > level)
+    idx = np.flatnonzero(m)
+    return 0 if not len(idx) else 1 + int(np.count_nonzero(np.diff(idx) >= 5))
+
+
 def resolve(rec: dict, df: pd.DataFrame, next_open: float | None) -> None:
     """Advance one paper trade using closed candles only (identical rules to backtest_divergence.trades_for)."""
     tf = rec["tf"]
@@ -129,8 +146,8 @@ def resolve(rec: dict, df: pd.DataFrame, next_open: float | None) -> None:
             rec.update(entry=entry, entry_time=et, status="skipped",
                        skip_reason="harga entry sudah melewati stop" if risk <= 0 else "jarak stop > 50%")
             return
-        rec.update(entry=entry, entry_time=et, tp=entry + RR * risk if up else entry - RR * risk, status="open")
-    entry, stop, tp = rec["entry"], rec["stop"], rec["tp"]
+        rec.update(entry=entry, entry_time=et, tp=None, status="open")
+    entry, stop = rec["entry"], rec["stop"]
     rec["last_price"], rec["last_time"] = float(c[-1]), int(t[-1])
     if ei >= n:                                                        # the entry candle is still forming
         rec["bars"] = 0
@@ -141,11 +158,9 @@ def resolve(rec: dict, df: pd.DataFrame, next_open: float | None) -> None:
         if up:
             if o[j] <= stop: px, why = float(o[j]), "stop"
             elif l[j] <= stop: px, why = stop, "stop"
-            elif h[j] >= tp: px, why = tp, "tp"
         else:
             if o[j] >= stop: px, why = float(o[j]), "stop"
             elif h[j] >= stop: px, why = stop, "stop"
-            elif l[j] <= tp: px, why = tp, "tp"
         if why is None and j == ei + hold - 1:
             px, why = float(c[j]), "time"
         if why:
@@ -162,6 +177,8 @@ def process(info: dict, rank: int, tf: str, hist: dict, backfill: bool, now_iso:
         return
     t = (df["open_time"].to_numpy() // 1000).astype(np.int64)
     sym = info["symbol"]
+    h, l, c = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
+    atr = dv.atr(df)
     for tab, p in (("cross", dv.Params(ob=60, max_gap=MAX_GAP[tf])), ("pre", dv.Params(ob=60, max_gap=MAX_GAP[tf], pre_gap=PRE_GAP))):
         for s in dv.detect(df, p):
             if tab == "pre" and not s.get("pre"):
@@ -178,20 +195,33 @@ def process(info: dict, rank: int, tf: str, hist: dict, backfill: bool, now_iso:
                     "p2": pk(t, s["p2"]), "mid": pk(t, s["mid"]) if s["skipped"] else None, "stop": float(s["stop"]),
                     "live": not backfill, "first_seen": now_iso, "status": "pending", "entry": None, "entry_time": None,
                     "tp": None, "exit_time": None, "exit_price": None, "gross": None, "bars": 0, "last_price": None,
-                    "last_time": None, "crossed_time": None, "skip_reason": None,
+                    "last_time": None, "crossed_time": None, "skip_reason": None, "sr": None,
                 }
             if tab == "pre" and s.get("cross_bar") is not None and rec.get("crossed_time") is None:
                 rec["crossed_time"] = int(t[s["cross_bar"]])
     for rec in hist.values():
-        if rec["symbol"] == sym and rec["tf"] == tf and rec["status"] in ("pending", "open"):
+        if rec["symbol"] != sym or rec["tf"] != tf:
+            continue
+        if rec.get("sr") is None:                                     # earlier rejections of the peak-2 level (known at signal time)
+            hit, p2h = np.where(t == rec["signal_time"])[0], np.where(t == rec["p2"][0])[0]
+            if len(hit) and len(p2h) and not np.isnan(atr[hit[0]]):
+                rec["sr"] = rejections(h, l, c, rec["stop"], rec["side"] == "bear", SR_TOL * atr[hit[0]], int(p2h[0]) - 2, int(hit[0]))
+        if rec["status"] in ("pending", "open"):
             resolve(rec, df, next_open)
 
 
 def main() -> int:
     hist: dict[str, dict] = {}
     backfill = not OUT.exists()
+    migrated = False
     if not backfill:
-        hist = {r["id"]: r for r in json.loads(OUT.read_text(encoding="utf-8"))["records"]}
+        old = json.loads(OUT.read_text(encoding="utf-8"))
+        hist = {r["id"]: r for r in old["records"]}
+        if old["meta"].get("rules_version", 1) < RULES_VERSION:      # exit rule changed (no TP, shorter hold): replay every record
+            migrated = True
+            for r in hist.values():
+                r.update(status="pending", entry=None, entry_time=None, tp=None, exit_time=None, exit_price=None, gross=None,
+                         bars=0, last_price=None, last_time=None, skip_reason=None, sr=None)
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     uni = universe()
     jobs = [(info, rank) for rank, info in enumerate(uni, 1)]
@@ -215,9 +245,11 @@ def main() -> int:
     recs = sorted(hist.values(), key=lambda r: (-r["signal_time"], r["rank"]))
     btc, _ = klines("BTC", "1d")
     meta = {
-        "generated_at": now_iso, "universe": len(uni), "failed": failed, "backfilled": backfill,
+        "generated_at": now_iso, "universe": len(uni), "failed": failed, "backfilled": backfill, "migrated": migrated,
+        "rules_version": RULES_VERSION,
         "last_daily_close": datetime.fromtimestamp(int(btc["open_time"].iloc[-1]) // 1000 + 86400, timezone.utc).isoformat(timespec="seconds"),
-        "rules": {"stoch": "5,3,3", "ob": 60, "pre_gap": PRE_GAP, "rr": RR, "hold": HOLD, "fee_per_side": 0.0005},
+        "rules": {"stoch": "5,3,3", "ob": 60, "pre_gap": PRE_GAP, "tp": None, "hold": HOLD, "fee_per_side": 0.0005,
+                  "sr": {"lookback": SR_LB, "tol_atr": SR_TOL, "min_rejections": SR_MIN}},
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix(".tmp")

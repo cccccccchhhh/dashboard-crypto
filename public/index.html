@@ -43,8 +43,9 @@ footer{padding:6px 16px;border-top:1px solid var(--line);color:var(--mut);font-s
 <nav id="sub"><button data-sub="active" class="on">Aktif</button><button data-sub="1d">Histori Daily</button><button data-sub="1w">Histori Weekly</button></nav>
 <label>Tipe <select id="fKind"><option value="">Regular + Hidden</option><option value="regular">Regular</option><option value="hidden">Hidden</option></select></label>
 <label>Arah <select id="fSide"><option value="">Bull + Bear</option><option value="bull">Bull (naik)</option><option value="bear">Bear (turun)</option></select></label>
-<label id="lSt">Status <select id="fSt"><option value="">Semua</option><option value="open">Open</option><option value="tp">TP kena</option><option value="stop">Stop kena</option><option value="time">Keluar waktu</option><option value="skipped">Dilewati</option></select></label>
+<label id="lSt">Status <select id="fSt"><option value="">Semua</option><option value="open">Open</option><option value="stop">Stop kena</option><option value="time">Hold selesai</option><option value="skipped">Dilewati</option></select></label>
 <label>Keputusan <select id="fDec"><option value="">Semua</option><option value="watch">Watch</option><option value="skip">Skip</option><option value="none">Belum diputuskan</option></select></label>
+<label>Rule inti <select id="fCore"><option value="">Semua</option><option value="core">Hanya rule inti</option></select></label>
 <label>Konflik W/D <select id="fConf"><option value="">Semua</option><option value="only">Hanya yang konflik</option><option value="hide">Sembunyikan konflik</option></select></label>
 <input type="search" id="fQ" placeholder="cari koin…" size="12">
 <span class="m" id="cnt"></span>
@@ -55,15 +56,17 @@ footer{padding:6px 16px;border-top:1px solid var(--line);color:var(--mut);font-s
 <div id="tbl"></div>
 <div id="side"><div id="sh"><b id="st"></b><span id="tfb"><button data-tf="1w">W</button> <button data-tf="1d">D</button> <button data-tf="4h">4H</button></span><button id="close">✕</button></div><div id="cwarn"></div><div id="c1"></div><div id="c2"></div><div id="info"></div></div>
 </main>
-<footer>Data hanya diperbarui sekali sehari setelah close candle daily (00:10 UTC = 07:10 WIB) dan hanya memakai candle yang sudah close, jadi sinyal tidak berubah-ubah. Setiap sinyal dicatat sebagai paper trade (entry = open candle berikutnya, stop = ekstrem puncak 2, TP 2R, keluar paksa 30 candle daily / 12 candle weekly) dan tidak pernah dihapus. P/L closed = setelah fee 0,05% per sisi; P/L open = belum realisasi, sebelum fee. Alat screening, bukan saran trading; keputusan ada di kamu.</footer>
+<footer>Data hanya diperbarui sekali sehari setelah close candle daily (00:10 UTC = 07:10 WIB) dan hanya memakai candle yang sudah close, jadi sinyal tidak berubah-ubah. Setiap sinyal dicatat sebagai paper trade (entry = open candle berikutnya, stop = ekstrem puncak 2, tanpa TP, tutup di close candle ke-4 weekly / ke-10 daily) dan tidak pernah dihapus. P/L closed = setelah fee 0,05% per sisi; P/L open = belum realisasi, sebelum fee. Alat screening, bukan saran trading; keputusan ada di kamu.</footer>
 <script>
 const COL={'regular|bear':'#ef5350','regular|bull':'#26a69a','hidden|bear':'#ffa726','hidden|bull':'#42a5f5'};
 const $=id=>document.getElementById(id);
 const NOTE={
- cross:'<b>Divergence sudah cross.</b> K sudah cross D pada close candle (terkonfirmasi). Entry = open candle berikutnya.',
+ cross:'<b>Divergence sudah cross.</b> K sudah cross D pada close candle (terkonfirmasi). Entry = open candle berikutnya, stop = ekstrem puncak 2, tanpa TP, tutup di close candle ke-4 (weekly) / ke-10 (daily) kalau stop tidak kena. <b>Rule inti</b> = weekly + bull + S/R kuat (ekstrem puncak 2 sudah ditolak ≥ 3 kali sebelumnya, ditandai ⭐); hanya itu yang didukung backtest. Bear dan daily hanya untuk pengamatan.',
  pre:'<b>Potensial crossing.</b> Divergence sudah terlihat tapi K belum cross D: selisih |K−D| ≤ 2 dan menyempit, K sudah berbalik menuju D. Di data top 100 weekly sekitar 70–75% kasus seperti ini cross di candle berikutnya, sisanya bisa gagal cross dan kena stop. Backtest: masuk lebih awal tidak lebih baik dari menunggu cross (profit factor sama atau sedikit lebih rendah). Kolom "Cross?" = apakah K/D sudah benar-benar cross sejak sinyal.'};
 let DATA=null,sel=null,sortK='signal_time',sortD=-1,TAB='cross',SUB='active';
 const FEE2=0.001;
+// CORE RULE (from the brute force): weekly, valid cross, bull, and the peak-2 low was rejected at least 3 times before
+const isCore=r=>r.tab=='cross'&&r.tf=='1w'&&r.side=='bull'&&(r.sr??0)>=3;
 const store={get(){try{return JSON.parse(localStorage.getItem('dec')||'{}')}catch(e){return{}}},set(o){try{localStorage.setItem('dec',JSON.stringify(o))}catch(e){}}};
 const key=r=>r.id;
 const fmtP=p=>p==null?'–':p>=100?p.toFixed(2):p>=1?p.toFixed(3):p.toPrecision(4);
@@ -83,44 +86,48 @@ fetch('data/history.json?'+Date.now()).then(r=>r.json()).then(d=>{DATA=d;compute
  if(hrs>30){const w=document.createElement('span');w.style.cssText='color:#ef5350;font-weight:600';w.textContent=` · ⚠ data belum diperbarui ${Math.floor(hrs/24)} hari ${Math.floor(hrs%24)} jam sejak daily close terakhir (scheduler telat/gagal)`;$('upd').appendChild(w)}
  render()})
  .catch(e=>{$('upd').textContent='gagal memuat data';$('tbl').innerHTML='<div class="empty">data/history.json belum ada. Jalankan scanner dulu.</div>'});
-['fKind','fSide','fSt','fDec','fConf','fQ'].forEach(i=>$(i).addEventListener(i=='fQ'?'input':'change',render));
+['fKind','fSide','fSt','fDec','fConf','fCore','fQ'].forEach(i=>$(i).addEventListener(i=='fQ'?'input':'change',render));
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;render()});
 document.querySelectorAll('#sub button').forEach(b=>b.onclick=()=>{SUB=b.dataset.sub;$('fSt').value='';render()});
 function base(){return DATA.records.filter(r=>r.tab==TAB)}
 function rows(){const dec=store.get(),q=$('fQ').value.trim().toUpperCase();
  return base().filter(r=>(SUB=='active'?r.status=='open':r.tf==SUB)&&(!$('fKind').value||r.kind==$('fKind').value)&&(!$('fSide').value||r.side==$('fSide').value)
-  &&(SUB=='active'||!$('fSt').value||r.status==$('fSt').value)&&(!$('fConf').value||($('fConf').value=='only'?!!CONF[TAB+'|'+r.symbol]:!CONF[TAB+'|'+r.symbol]))
+  &&(SUB=='active'||!$('fSt').value||r.status==$('fSt').value)&&(!$('fCore').value||isCore(r))&&(!$('fConf').value||($('fConf').value=='only'?!!CONF[TAB+'|'+r.symbol]:!CONF[TAB+'|'+r.symbol]))
   &&(!q||r.symbol.includes(q)||r.name.toUpperCase().includes(q))&&(!$('fDec').value||($('fDec').value=='none'?!dec[key(r)]:dec[key(r)]==$('fDec').value)))}
-const ST={open:['open','#42a5f5'],tp:['TP kena','#26a69a'],stop:['stop kena','#ef5350'],time:['keluar waktu','#8b96a5'],skipped:['dilewati','#555'],pending:['menunggu entry','#8b96a5']};
+const ST={open:['open','#42a5f5'],tp:['TP kena','#26a69a'],stop:['stop kena','#ef5350'],time:['hold selesai','#8b96a5'],skipped:['dilewati','#555'],pending:['menunggu entry','#8b96a5']};
 function val(r,k,dec){if(k=='pl')return pl(r)??-1e9;if(k=='dec')return dec[key(r)]||'';if(k=='px')return (r.status=='open'?r.last_price:r.exit_price)??0;if(k=='crossed_time')return r.crossed_time||0;return r[k]??-1e18}
 function stats(R){const el=$('stats');if(SUB=='active'){el.style.display='none';return}
  const done=R.filter(r=>['tp','stop','time'].includes(r.status)),w=done.filter(r=>pl(r)>0),n=done.length,
   gp=done.filter(r=>pl(r)>0).reduce((a,r)=>a+pl(r),0),gl=-done.filter(r=>pl(r)<=0).reduce((a,r)=>a+pl(r),0),
   open=R.filter(r=>r.status=='open').length,bf=R.filter(r=>!r.live).length;
  el.style.display='block';
- el.innerHTML=n?`Selesai <b>${n}</b> · winrate <b>${(w.length/n*100).toFixed(0)}%</b> · rata-rata net <b class="${gp-gl>=0?'up':'dn'}">${((gp-gl)/n).toFixed(2)}%</b>/trade · profit factor <b>${gl>0?(gp/gl).toFixed(2):'∞'}</b> · TP ${done.filter(r=>r.status=='tp').length} / stop ${done.filter(r=>r.status=='stop').length} / waktu ${done.filter(r=>r.status=='time').length} · masih open ${open}`
+ el.innerHTML=n?`Selesai <b>${n}</b> · winrate <b>${(w.length/n*100).toFixed(0)}%</b> · rata-rata net <b class="${gp-gl>=0?'up':'dn'}">${((gp-gl)/n).toFixed(2)}%</b>/trade · profit factor <b>${gl>0?(gp/gl).toFixed(2):'∞'}</b> · stop kena ${done.filter(r=>r.status=='stop').length} / hold selesai ${done.filter(r=>r.status=='time').length} · masih open ${open}`
   :`Belum ada trade selesai · masih open ${open}`;
  el.innerHTML+=bf?` <span class="m">· ${bf} catatan backfill (disimulasikan dari data lampau, bukan sinyal live)</span>`:'';
- el.innerHTML+=' <span class="m">· net = setelah fee 0,05% per sisi</span>'}
+ el.innerHTML+=' <span class="m">· net = setelah fee 0,05% per sisi</span>';
+ // running scorecard of the core rule over ALL its records (live + backfill), independent of the filters
+ const cd=DATA.records.filter(r=>isCore(r)&&['stop','time'].includes(r.status)),cw=cd.filter(r=>pl(r)>0),cg=cd.reduce((a,r)=>a+Math.max(pl(r),0),0),cl=-cd.reduce((a,r)=>a+Math.min(pl(r),0),0),
+  co=DATA.records.filter(r=>isCore(r)&&r.status=='open').length,cl2=cd.filter(r=>r.live).length;
+ el.innerHTML+=`<br>⭐ <b>Rule inti</b>: selesai <b>${cd.length}</b> (${cl2} live) · winrate <b>${cd.length?(cw.length/cd.length*100).toFixed(0):'–'}%</b> · rata-rata net <b>${cd.length?((cg-cl)/cd.length).toFixed(2):'–'}%</b> · profit factor <b>${cl>0?(cg/cl).toFixed(2):'–'}</b> · open ${co} <span class="m">· target uji: ±40 sinyal live, gagal kalau profit factor &lt; 1,2 atau rata-rata net &lt; 0</span>`}
 function render(){if(!DATA)return;const dec=store.get();
  document.querySelectorAll('#tabs button').forEach(b=>{const t=b.dataset.tab;b.classList.toggle('on',t==TAB);
   const nOpen=DATA.records.filter(r=>r.tab==t&&r.status=='open').length;b.textContent=(t=='cross'?'Divergence sudah cross':'Potensial crossing')+` (${nOpen} aktif)`});
  const B0=base();
  document.querySelectorAll('#sub button').forEach(b=>{const s=b.dataset.sub;b.classList.toggle('on',s==SUB);
   b.textContent=s=='active'?`Aktif (${B0.filter(r=>r.status=='open').length})`:`Histori ${s=='1d'?'Daily':'Weekly'} (${B0.filter(r=>r.tf==s).length})`});
- $('note').innerHTML=NOTE[TAB];$('lSt').style.display=SUB=='active'?'none':'';
+ $('note').innerHTML=NOTE[TAB]+(SUB=='1d'?'<br><b style="color:#ffa726">Daily = pengamatan saja.</b> Backtest 100 koin tidak menemukan edge di daily (profit factor ~1,04, tidak bertahan di data baru).':'');$('lSt').style.display=SUB=='active'?'none':'';
  let R=rows();stats(R);
  R.sort((a,b)=>{const x=val(a,sortK,dec),y=val(b,sortK,dec);return (x>y?1:x<y?-1:0)*sortD||a.rank-b.rank});
  $('cnt').textContent=R.length+' catatan';
  if(!R.length){$('tbl').innerHTML=`<div class="empty">${SUB=='active'?'Tidak ada trade yang sedang berjalan dengan filter ini.':'Belum ada catatan dengan filter ini.'}</div>`;return}
- const COLS=[['rank','#'],['symbol','Koin'],['tf','TF'],['kind','Tipe'],['side','Arah'],['signal_time','Sinyal'],['entry','Entry'],['stop','Stop'],['tp','TP 2R'],['px','Harga / exit'],['pl','P/L'],['status','Status']];
+ const COLS=[['rank','#'],['symbol','Koin'],['tf','TF'],['kind','Tipe'],['side','Arah'],['signal_time','Sinyal'],['entry','Entry'],['stop','Stop'],['sr','S/R'],['px','Harga / exit'],['pl','P/L'],['status','Status']];
  if(TAB=='pre')COLS.push(['crossed_time','Cross?']);COLS.push(['dec','Keputusan']);
  let h='<table><thead><tr>'+COLS.map(([k,n])=>`<th data-k="${k}">${n}${sortK==k?(sortD>0?' ▲':' ▼'):''}</th>`).join('')+'</tr></thead><tbody>';
  R.forEach(r=>{const c=COL[r.kind+'|'+r.side],k=key(r),d=dec[k]||'',p=pl(r),st=ST[r.status]||[r.status,'#555'],cf=CONF[TAB+'|'+r.symbol];
-  h+=`<tr class="row${sel==k?' on':''}" data-k="${k}"><td class="m">${r.rank}</td><td><b>${r.symbol}</b> <span class="m">${r.name}</span>${cf?`<span class="pill conf" title="${cf}">⚠ konflik W/D</span>`:''}</td>
+  h+=`<tr class="row${sel==k?' on':''}" data-k="${k}"><td class="m">${r.rank}</td><td><b>${r.symbol}</b> <span class="m">${r.name}</span>${isCore(r)?'<span class="pill" style="background:#f5c518;margin-left:4px" title="weekly + bull + S/R kuat">RULE INTI</span>':''}${r.tf=='1d'?'<span class="bf" title="daily: tidak ada edge di backtest">pengamatan</span>':''}${cf?`<span class="pill conf" title="${cf}">⚠ konflik W/D</span>`:''}</td>
   <td>${r.tf=='1w'?'W':'D'}</td><td><span class="pill" style="background:${c}">${r.kind}${r.skip?' 1→3':''}</span></td>
   <td class="${r.side=='bull'?'up':'dn'}">${r.side=='bull'?'▲ naik':'▼ turun'}</td><td class="m">${fmtD(r.signal_time)}${r.live?'':'<span class="bf" title="disimulasikan dari data lampau">backfill</span>'}</td>
-  <td><b>${fmtP(r.entry)}</b></td><td>${fmtP(r.stop)}</td><td>${fmtP(r.tp)}</td><td>${fmtP(r.status=='open'?r.last_price:r.exit_price)}</td>
+  <td><b>${fmtP(r.entry)}</b></td><td>${fmtP(r.stop)}</td><td>${r.sr==null?'<span class="m">–</span>':r.sr>=3?`<b style="color:#f5c518">⭐ ${r.sr}</b>`:r.sr}</td><td>${fmtP(r.status=='open'?r.last_price:r.exit_price)}</td>
   <td class="${p==null?'m':p>=0?'up':'dn'}">${p==null?'–':(p>=0?'+':'')+p.toFixed(1)+'%'}${r.status=='open'&&p!=null?' <span class="m">(open)</span>':''}</td>
   <td><span class="pill" style="background:${st[1]}" ${r.skip_reason?`title="${r.skip_reason}"`:''}>${st[0]}</span>${r.status=='open'&&r.bars?` <span class="m">${r.bars}c</span>`:''}</td>`
   +(TAB=='pre'?`<td>${r.crossed_time?`<span class="up">✓ ${fmtD(r.crossed_time)}</span>`:'<span class="m">belum</span>'}</td>`:'')
@@ -229,7 +236,7 @@ function paint(s,tf,B,live){shownTf=tf;const [k,d]=stochJS(B),a=atrJS(B),n=B.len
   const after=si<0?[]:B.slice(si+1),invalid=after.some(b=>up?b.l<=o.stop:b.h>=o.stop),risk=Math.abs(entry-o.stop)/entry*100;
   info=`<b>${up?'LONG':'SHORT'} entry ${fmtP(entry)}</b> `+(pending&&!rec?'(perkiraan = harga sekarang; entry sebenarnya = open candle berikutnya setelah sinyal)':`(open candle ${fmtD(et)}, tepat setelah candle sinyal ${fmtD(o.sig)})`)+
    `. Stop ${fmtP(o.stop)} (ekstrem puncak 2), jarak ${risk.toFixed(1)}% dari entry${invalid?' · <span style="color:#ef5350">sudah tersentuh, divergence invalid</span>':''}. `+
-   `Puncak 1: ${fmtD(o.p1[0])} @ ${fmtP(o.p1[1])} · K ${o.p1[3].toFixed(0)}. Puncak 2: ${fmtD(o.p2[0])} @ ${fmtP(o.p2[1])} · K ${o.p2[3].toFixed(0)}.`+(age>0?` Sinyal ini ${age} candle lalu.`:' Sinyal di candle terakhir.')+(native?'':' Hanya divergence TERAKHIR di TF ini yang digambar, dihitung di browser dengan aturan yang sama dengan scanner.')}
+   `${native&&s.sr!=null?`S/R: ${s.sr} penolakan sebelumnya${s.sr>=3?' ⭐ kuat':''}. `:''}Puncak 1: ${fmtD(o.p1[0])} @ ${fmtP(o.p1[1])} · K ${o.p1[3].toFixed(0)}. Puncak 2: ${fmtD(o.p2[0])} @ ${fmtP(o.p2[1])} · K ${o.p2[3].toFixed(0)}.`+(age>0?` Sinyal ini ${age} candle lalu.`:' Sinyal di candle terakhir.')+(native?'':' Hanya divergence TERAKHIR di TF ini yang digambar, dihitung di browser dengan aturan yang sama dengan scanner.')}
  else info=`Tidak ada divergence terdeteksi di ${TFN[tf]} pada 500 candle terakhir.`;
  cs.setMarkers(markers);
  const c0=COL[s.kind+'|'+s.side];
