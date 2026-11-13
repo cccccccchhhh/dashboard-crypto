@@ -14,6 +14,19 @@ Static dashboard + one scheduled scan per day. No database: the history is a JSO
 - `.github/workflows/scan.yml` runs once a day at 00:10 UTC (07:10 WIB), right after the daily close, and commits the new JSON.
   Vercel redeploys on every push.
 
+## Making the daily run reliable
+
+GitHub's own `schedule:` trigger can be hours late or skipped. So the wake-up call comes from **Vercel Cron** (`vercel.json`, 00:20 UTC):
+it calls `api/trigger.js`, which asks GitHub to run the workflow (`workflow_dispatch`). GitHub Actions still does the scan and the commit.
+The workflow also keeps its own `schedule:` as a backup. Setup:
+
+1. GitHub: Settings, Developer settings, Personal access tokens, Fine-grained tokens. Repository access: only this repo.
+   Permission: **Actions: Read and write**. Copy the token.
+2. Vercel project, Settings, Environment Variables (Production): `GITHUB_TOKEN` = the token, `CRON_SECRET` = any long random string.
+3. Redeploy once. Check Vercel, project, Settings, Cron Jobs, and press "Run" to test.
+
+The dashboard header turns red when the data is older than about 30 hours, so a missed run is visible.
+
 ## Why no database
 
 History is a few hundred KB (about 5-10 new signals a day). A JSON file in git is versioned, free and good enough. A database

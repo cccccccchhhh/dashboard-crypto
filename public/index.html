@@ -77,7 +77,11 @@ function computeConf(){const by={};DATA.records.filter(r=>r.status=='open').forE
   const parts=[];w.forEach(a=>d.forEach(b=>{if(a!=b)parts.push(`Weekly ${a=='bull'?'BULL (naik)':'BEAR (turun)'} vs Daily ${b=='bull'?'BULL (naik)':'BEAR (turun)'}`)}));
   if(parts.length)CONF[k]=[...new Set(parts)].join('; ')})}
 fetch('data/history.json?'+Date.now()).then(r=>r.json()).then(d=>{DATA=d;computeConf();const m=d.meta;
- $('upd').textContent=`update ${new Date(m.generated_at).toLocaleString('id-ID')} · daily close terakhir ${new Date(m.last_daily_close).toLocaleString('id-ID')} · ${m.universe} koin · ${d.records.length} catatan`+(m.failed?` · ${m.failed} download gagal`:'');render()})
+ $('upd').textContent=`update ${new Date(m.generated_at).toLocaleString('id-ID')} · daily close terakhir ${new Date(m.last_daily_close).toLocaleString('id-ID')} · ${m.universe} koin · ${d.records.length} catatan`+(m.failed?` · ${m.failed} download gagal`:'');
+ // the scan runs once a day just after the daily close: if the data is older than ~30h the scheduler missed a run
+ const hrs=(Date.now()-new Date(m.last_daily_close))/36e5;
+ if(hrs>30){const w=document.createElement('span');w.style.cssText='color:#ef5350;font-weight:600';w.textContent=` · ⚠ data belum diperbarui ${Math.floor(hrs/24)} hari ${Math.floor(hrs%24)} jam sejak daily close terakhir (scheduler telat/gagal)`;$('upd').appendChild(w)}
+ render()})
  .catch(e=>{$('upd').textContent='gagal memuat data';$('tbl').innerHTML='<div class="empty">data/history.json belum ada. Jalankan scanner dulu.</div>'});
 ['fKind','fSide','fSt','fDec','fConf','fQ'].forEach(i=>$(i).addEventListener(i=='fQ'?'input':'change',render));
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;render()});

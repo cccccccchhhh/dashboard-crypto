@@ -3,6 +3,7 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": "public",
+  "crons": [{ "path": "/api/trigger", "schedule": "20 0 * * *" }],
   "headers": [
     {
       "source": "/data/(.*)",
